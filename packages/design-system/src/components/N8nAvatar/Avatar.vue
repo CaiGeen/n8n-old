@@ -1,20 +1,21 @@
 <template>
 	<span :class="['n8n-avatar', $style.container]" v-bind="$attrs">
 		<Avatar
-			v-if="firstName"
+			v-if="name"
 			:size="getSize(size)"
-			:name="firstName + ' ' + lastName"
+			:name="name"
 			variant="marble"
 			:colors="getColors(colors)"
 		/>
-		<div v-else :class="[$style.empty, $style[size]]"></div>
-		<span v-if="firstName" :class="$style.initials">{{ initials }}</span>
+		<span v-else :class="[$style.empty, $style[size]]" />
+		<span v-if="name" :class="$style.initials">{{ initials }}</span>
 	</span>
 </template>
 
 <script lang="ts" setup>
 import { computed } from 'vue';
 import Avatar from 'vue-boring-avatars';
+import { getInitials } from '../../utils/labelUtil';
 
 interface AvatarProps {
 	firstName: string;
@@ -37,11 +38,8 @@ const props = withDefaults(defineProps<AvatarProps>(), {
 	],
 });
 
-const initials = computed(
-	() =>
-		(props.firstName ? props.firstName.charAt(0) : '') +
-		(props.lastName ? props.lastName.charAt(0) : ''),
-);
+const name = computed(() => `${props.firstName} ${props.lastName}`.trim());
+const initials = computed(() => getInitials(name.value));
 
 const getColors = (colors: string[]): string[] => {
 	const style = getComputedStyle(document.body);
@@ -65,6 +63,7 @@ const getSize = (size: string): number => sizes[size];
 }
 
 .empty {
+	display: block;
 	border-radius: 50%;
 	background-color: var(--color-foreground-dark);
 	opacity: 0.3;
@@ -75,7 +74,8 @@ const getSize = (size: string): number => sizes[size];
 	font-size: var(--font-size-2xs);
 	font-weight: var(--font-weight-bold);
 	color: var(--color-avatar-font);
-	text-shadow: 0px 1px 6px rgba(25, 11, 9, 0.3);
+	text-shadow: 0 1px 6px rgba(25, 11, 9, 0.3);
+	text-transform: uppercase;
 }
 
 .small {

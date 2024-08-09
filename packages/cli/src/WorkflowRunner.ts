@@ -16,8 +16,8 @@ import type {
 } from 'n8n-workflow';
 import {
 	ErrorReporterProxy as ErrorReporter,
+	ExecutionCancelledError,
 	Workflow,
-	WorkflowOperationError,
 } from 'n8n-workflow';
 
 import PCancelable from 'p-cancelable';
@@ -28,20 +28,19 @@ import { ExecutionRepository } from '@db/repositories/execution.repository';
 import { ExternalHooks } from '@/ExternalHooks';
 import type { IExecutionResponse, IWorkflowExecutionDataProcess } from '@/Interfaces';
 import { NodeTypes } from '@/NodeTypes';
-import type { Job, JobData, JobResponse } from '@/Queue';
-import { Queue } from '@/Queue';
+import type { Job, JobData, JobResult } from '@/scaling/types';
+import type { ScalingService } from '@/scaling/scaling.service';
 import * as WorkflowHelpers from '@/WorkflowHelpers';
 import * as WorkflowExecuteAdditionalData from '@/WorkflowExecuteAdditionalData';
 import { generateFailedExecutionFromError } from '@/WorkflowHelpers';
 import { PermissionChecker } from '@/UserManagement/PermissionChecker';
-import { InternalHooks } from '@/InternalHooks';
 import { Logger } from '@/Logger';
 import { WorkflowStaticDataService } from '@/workflows/workflowStaticData.service';
-import { EventRelay } from './eventbus/event-relay.service';
+import { EventService } from './events/event.service';
 
 @Service()
 export class WorkflowRunner {
-	private jobQueue: Queue;
+	private scalingService: ScalingService;
 
 	private executionsMode = config.getEnv('executions.mode');
 
@@ -53,12 +52,8 @@ export class WorkflowRunner {
 		private readonly workflowStaticDataService: WorkflowStaticDataService,
 		private readonly nodeTypes: NodeTypes,
 		private readonly permissionChecker: PermissionChecker,
-		private readonly eventRelay: EventRelay,
-	) {
-		if (this.executionsMode === 'queue') {
-			this.jobQueue = Container.get(Queue);
-		}
-	}
+		private readonly eventService: EventService,
+	) {}
 
 	/** The process did error */
 	async processError(
@@ -147,7 +142,7 @@ export class WorkflowRunner {
 			await this.enqueueExecution(executionId, data, loadStaticData, realtime);
 		} else {
 			await this.runMainProcess(executionId, data, loadStaticData, restartExecutionId);
-			this.eventRelay.emit('workflow-pre-execute', { executionId, data });
+			this.eventService.emit('workflow-pre-execute', { executionId, data });
 		}
 
 		// only run these when not in queue mode or when the execution is manual,
@@ -160,19 +155,11 @@ export class WorkflowRunner {
 			const postExecutePromise = this.activeExecutions.getPostExecutePromise(executionId);
 			postExecutePromise
 				.then(async (executionData) => {
-					void Container.get(InternalHooks).onWorkflowPostExecute(
+					this.eventService.emit('workflow-post-execute', {
+						workflow: data.workflowData,
 						executionId,
-						data.workflowData,
-						executionData,
-						data.userId,
-					);
-					this.eventRelay.emit('workflow-post-execute', {
-						workflowId: data.workflowData.id,
-						workflowName: data.workflowData.name,
-						executionId,
-						success: executionData?.status === 'success',
-						isManual: data.executionMode === 'manual',
 						userId: data.userId,
+						runData: executionData,
 					});
 					if (this.externalHooks.exists('workflow.postExecute')) {
 						try {
@@ -188,6 +175,7 @@ export class WorkflowRunner {
 					}
 				})
 				.catch((error) => {
+					if (error instanceof ExecutionCancelledError) return;
 					ErrorReporter.error(error);
 					this.logger.error(
 						'There was a problem running internal hook "onWorkflowPostExecute"',
@@ -368,6 +356,11 @@ export class WorkflowRunner {
 			loadStaticData: !!loadStaticData,
 		};
 
+		if (!this.scalingService) {
+			const { ScalingService } = await import('@/scaling/scaling.service');
+			this.scalingService = Container.get(ScalingService);
+		}
+
 		let priority = 100;
 		if (realtime === true) {
 			// Jobs which require a direct response get a higher priority
@@ -383,9 +376,7 @@ export class WorkflowRunner {
 		let job: Job;
 		let hooks: WorkflowHooks;
 		try {
-			job = await this.jobQueue.add(jobData, jobOptions);
-
-			this.logger.info(`Started with job ID: ${job.id.toString()} (Execution ID: ${executionId})`);
+			job = await this.scalingService.addJob(jobData, jobOptions);
 
 			hooks = WorkflowExecuteAdditionalData.getWorkflowHooksWorkerMain(
 				data.executionMode,
@@ -414,8 +405,7 @@ export class WorkflowRunner {
 			async (resolve, reject, onCancel) => {
 				onCancel.shouldReject = false;
 				onCancel(async () => {
-					const queue = Container.get(Queue);
-					await queue.stopJob(job);
+					await this.scalingService.stopJob(job);
 
 					// We use "getWorkflowHooksWorkerExecuter" as "getWorkflowHooksWorkerMain" does not contain the
 					// "workflowExecuteAfter" which we require.
@@ -426,17 +416,17 @@ export class WorkflowRunner {
 						{ retryOf: data.retryOf ? data.retryOf.toString() : undefined },
 					);
 
-					const error = new WorkflowOperationError('Workflow-Execution has been canceled!');
+					const error = new ExecutionCancelledError(executionId);
 					await this.processError(error, new Date(), data.executionMode, executionId, hooksWorker);
 
 					reject(error);
 				});
 
-				const jobData: Promise<JobResponse> = job.finished();
+				const jobData: Promise<JobResult> = job.finished();
 
 				const queueRecoveryInterval = config.getEnv('queue.bull.queueRecoveryInterval');
 
-				const racingPromises: Array<Promise<JobResponse>> = [jobData];
+				const racingPromises: Array<Promise<JobResult>> = [jobData];
 
 				let clearWatchdogInterval;
 				if (queueRecoveryInterval > 0) {
@@ -454,9 +444,9 @@ export class WorkflowRunner {
 					 ************************************************ */
 					let watchDogInterval: NodeJS.Timeout | undefined;
 
-					const watchDog: Promise<JobResponse> = new Promise((res) => {
+					const watchDog: Promise<JobResult> = new Promise((res) => {
 						watchDogInterval = setInterval(async () => {
-							const currentJob = await this.jobQueue.getJob(job.id);
+							const currentJob = await this.scalingService.getJob(job.id);
 							// When null means job is finished (not found in queue)
 							if (currentJob === null) {
 								// Mimic worker's success message

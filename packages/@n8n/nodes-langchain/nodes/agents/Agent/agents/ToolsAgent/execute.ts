@@ -90,7 +90,7 @@ export async function toolsAgentExecute(this: IExecuteFunctions): Promise<INodeE
 		| BaseChatMemory
 		| undefined;
 
-	const tools = (await getConnectedTools(this, true)) as Array<DynamicStructuredTool | Tool>;
+	const tools = (await getConnectedTools(this, true, false)) as Array<DynamicStructuredTool | Tool>;
 	const outputParser = (await getOptionalOutputParsers(this))?.[0];
 	let structuredOutputParserTool: DynamicStructuredTool | undefined;
 
@@ -226,7 +226,10 @@ export async function toolsAgentExecute(this: IExecuteFunctions): Promise<INodeE
 			});
 		} catch (error) {
 			if (this.continueOnFail(error)) {
-				returnData.push({ json: { error: error.message }, pairedItem: { item: itemIndex } });
+				returnData.push({
+					json: { error: error.message },
+					pairedItem: { item: itemIndex },
+				});
 				continue;
 			}
 

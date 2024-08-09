@@ -1,21 +1,35 @@
-import { NodeConnectionType, NodeOperationError, jsonStringify } from 'n8n-workflow';
 import type {
 	EventNamesAiNodesType,
 	IDataObject,
 	IExecuteFunctions,
 	IWebhookFunctions,
 } from 'n8n-workflow';
+import { NodeConnectionType, NodeOperationError, jsonStringify } from 'n8n-workflow';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { BaseOutputParser } from '@langchain/core/output_parsers';
 import type { BaseMessage } from '@langchain/core/messages';
-import { DynamicTool, type Tool } from '@langchain/core/tools';
+import type { Tool } from '@langchain/core/tools';
 import type { BaseLLM } from '@langchain/core/language_models/llms';
+import type { BaseChatMemory } from 'langchain/memory';
+import type { BaseChatMessageHistory } from '@langchain/core/chat_history';
+import { N8nTool } from './N8nTool';
+import { DynamicTool } from '@langchain/core/tools';
+
+function hasMethods<T>(obj: unknown, ...methodNames: Array<string | symbol>): obj is T {
+	return methodNames.every(
+		(methodName) =>
+			typeof obj === 'object' &&
+			obj !== null &&
+			methodName in obj &&
+			typeof (obj as Record<string | symbol, unknown>)[methodName] === 'function',
+	);
+}
 
 export function getMetadataFiltersValues(
 	ctx: IExecuteFunctions,
 	itemIndex: number,
 ): Record<string, never> | undefined {
-	const options = ctx.getNodeParameter('options', itemIndex);
+	const options = ctx.getNodeParameter('options', itemIndex, {});
 
 	if (options.metadata) {
 		const { metadataValues: metadata } = options.metadata as {
@@ -38,10 +52,24 @@ export function getMetadataFiltersValues(
 	return undefined;
 }
 
+export function isBaseChatMemory(obj: unknown) {
+	return hasMethods<BaseChatMemory>(obj, 'loadMemoryVariables', 'saveContext');
+}
+
+export function isBaseChatMessageHistory(obj: unknown) {
+	return hasMethods<BaseChatMessageHistory>(obj, 'getMessages', 'addMessage');
+}
+
 export function isChatInstance(model: unknown): model is BaseChatModel {
-	const namespace = (model as BaseLLM | BaseChatModel)?.lc_namespace ?? [];
+	const namespace = (model as BaseLLM)?.lc_namespace ?? [];
 
 	return namespace.includes('chat_models');
+}
+
+export function isToolsInstance(model: unknown): model is Tool {
+	const namespace = (model as Tool)?.lc_namespace ?? [];
+
+	return namespace.includes('tools');
 }
 
 export async function getOptionalOutputParsers(
@@ -152,7 +180,11 @@ export function serializeChatHistory(chatHistory: BaseMessage[]): string {
 		.join('\n');
 }
 
-export const getConnectedTools = async (ctx: IExecuteFunctions, enforceUniqueNames: boolean) => {
+export const getConnectedTools = async (
+	ctx: IExecuteFunctions,
+	enforceUniqueNames: boolean,
+	convertStructuredTool: boolean = true,
+) => {
 	const connectedTools =
 		((await ctx.getInputConnectionData(NodeConnectionType.AiTool, 0)) as Tool[]) || [];
 
@@ -160,8 +192,10 @@ export const getConnectedTools = async (ctx: IExecuteFunctions, enforceUniqueNam
 
 	const seenNames = new Set<string>();
 
+	const finalTools = [];
+
 	for (const tool of connectedTools) {
-		if (!(tool instanceof DynamicTool)) continue;
+		if (!(tool instanceof DynamicTool) && !(tool instanceof N8nTool)) continue;
 
 		const { name } = tool;
 		if (seenNames.has(name)) {
@@ -171,7 +205,13 @@ export const getConnectedTools = async (ctx: IExecuteFunctions, enforceUniqueNam
 			);
 		}
 		seenNames.add(name);
+
+		if (convertStructuredTool && tool instanceof N8nTool) {
+			finalTools.push(tool.asDynamicTool());
+		} else {
+			finalTools.push(tool);
+		}
 	}
 
-	return connectedTools;
+	return finalTools;
 };

@@ -3,9 +3,9 @@ import { Push } from '@/push';
 import { jsonStringify, sleep } from 'n8n-workflow';
 import { ExecutionRepository } from '@db/repositories/execution.repository';
 import { getWorkflowHooksMain } from '@/WorkflowExecuteAdditionalData'; // @TODO: Dependency cycle
-import { InternalHooks } from '@/InternalHooks'; // @TODO: Dependency cycle if injected
 import type { DateTime } from 'luxon';
 import type { IRun, ITaskData } from 'n8n-workflow';
+import { InstanceSettings } from 'n8n-core';
 import type { EventMessageTypes } from '../eventbus/EventMessageClasses';
 import type { IExecutionResponse } from '@/Interfaces';
 import { NodeCrashedError } from '@/errors/node-crashed.error';
@@ -16,7 +16,7 @@ import config from '@/config';
 import { OnShutdown } from '@/decorators/OnShutdown';
 import type { QueueRecoverySettings } from './execution.types';
 import { OrchestrationService } from '@/services/orchestration.service';
-import { EventRelay } from '@/eventbus/event-relay.service';
+import { EventService } from '@/events/event.service';
 
 /**
  * Service for recovering key properties in executions.
@@ -25,10 +25,11 @@ import { EventRelay } from '@/eventbus/event-relay.service';
 export class ExecutionRecoveryService {
 	constructor(
 		private readonly logger: Logger,
+		private readonly instanceSettings: InstanceSettings,
 		private readonly push: Push,
 		private readonly executionRepository: ExecutionRepository,
 		private readonly orchestrationService: OrchestrationService,
-		private readonly eventRelay: EventRelay,
+		private readonly eventService: EventService,
 	) {}
 
 	/**
@@ -37,10 +38,10 @@ export class ExecutionRecoveryService {
 	init() {
 		if (config.getEnv('executions.mode') === 'regular') return;
 
-		const { isLeader, isMultiMainSetupEnabled } = this.orchestrationService;
-
+		const { isLeader } = this.instanceSettings;
 		if (isLeader) this.scheduleQueueRecovery();
 
+		const { isMultiMainSetupEnabled } = this.orchestrationService;
 		if (isMultiMainSetupEnabled) {
 			this.orchestrationService.multiMainSetup
 				.on('leader-takeover', () => this.scheduleQueueRecovery())
@@ -59,7 +60,7 @@ export class ExecutionRecoveryService {
 	 * Recover key properties of a truncated execution using event logs.
 	 */
 	async recoverFromLogs(executionId: string, messages: EventMessageTypes[]) {
-		if (this.orchestrationService.isFollower) return;
+		if (this.instanceSettings.isFollower) return;
 
 		const amendedExecution = await this.amend(executionId, messages);
 
@@ -134,9 +135,11 @@ export class ExecutionRecoveryService {
 			return waitMs;
 		}
 
-		const { Queue } = await import('@/Queue');
+		const { ScalingService } = await import('@/scaling/scaling.service');
 
-		const queuedIds = await Container.get(Queue).getInProgressExecutionIds();
+		const runningJobs = await Container.get(ScalingService).findJobsByStatus(['active', 'waiting']);
+
+		const queuedIds = new Set(runningJobs.map((job) => job.data.executionId));
 
 		if (queuedIds.size === 0) {
 			this.logger.debug('[Recovery] Completed queue recovery check, no dangling executions');
@@ -189,6 +192,10 @@ export class ExecutionRecoveryService {
 			);
 
 			if (!nodeStartedMessage) continue;
+
+			const nodeHasRunData = runExecutionData.resultData.runData[node.name] !== undefined;
+
+			if (nodeHasRunData) continue; // when saving execution progress
 
 			const nodeFinishedMessage = nodeMessages.find(
 				(m) => m.payload.nodeName === node.name && m.eventName === 'n8n.node.finished',
@@ -276,22 +283,10 @@ export class ExecutionRecoveryService {
 	private async runHooks(execution: IExecutionResponse) {
 		execution.data ??= { resultData: { runData: {} } };
 
-		await Container.get(InternalHooks).onWorkflowPostExecute(execution.id, execution.workflowData, {
-			data: execution.data,
-			finished: false,
-			mode: execution.mode,
-			waitTill: execution.waitTill,
-			startedAt: execution.startedAt,
-			stoppedAt: execution.stoppedAt,
-			status: execution.status,
-		});
-
-		this.eventRelay.emit('workflow-post-execute', {
-			workflowId: execution.workflowData.id,
-			workflowName: execution.workflowData.name,
+		this.eventService.emit('workflow-post-execute', {
+			workflow: execution.workflowData,
 			executionId: execution.id,
-			success: execution.status === 'success',
-			isManual: execution.mode === 'manual',
+			runData: execution,
 		});
 
 		const externalHooks = getWorkflowHooksMain(
@@ -328,7 +323,7 @@ export class ExecutionRecoveryService {
 	private shouldScheduleQueueRecovery() {
 		return (
 			config.getEnv('executions.mode') === 'queue' &&
-			config.getEnv('multiMainSetup.instanceType') === 'leader' &&
+			this.instanceSettings.isLeader &&
 			!this.isShuttingDown
 		);
 	}

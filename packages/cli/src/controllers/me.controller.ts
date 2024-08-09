@@ -19,11 +19,12 @@ import { isSamlLicensedAndEnabled } from '@/sso/saml/samlHelpers';
 import { UserService } from '@/services/user.service';
 import { Logger } from '@/Logger';
 import { ExternalHooks } from '@/ExternalHooks';
-import { InternalHooks } from '@/InternalHooks';
 import { BadRequestError } from '@/errors/response-errors/bad-request.error';
 import { UserRepository } from '@/databases/repositories/user.repository';
 import { isApiEnabled } from '@/PublicApi';
-import { EventRelay } from '@/eventbus/event-relay.service';
+import { EventService } from '@/events/event.service';
+
+export const API_KEY_PREFIX = 'n8n_api_';
 
 export const isApiEnabledMiddleware: RequestHandler = (_, res, next) => {
 	if (isApiEnabled()) {
@@ -38,12 +39,11 @@ export class MeController {
 	constructor(
 		private readonly logger: Logger,
 		private readonly externalHooks: ExternalHooks,
-		private readonly internalHooks: InternalHooks,
 		private readonly authService: AuthService,
 		private readonly userService: UserService,
 		private readonly passwordUtility: PasswordUtility,
 		private readonly userRepository: UserRepository,
-		private readonly eventRelay: EventRelay,
+		private readonly eventService: EventService,
 	) {}
 
 	/**
@@ -89,6 +89,7 @@ export class MeController {
 
 		await this.externalHooks.run('user.profile.beforeUpdate', [userId, currentEmail, payload]);
 
+		const preUpdateUser = await this.userRepository.findOneByOrFail({ id: userId });
 		await this.userService.update(userId, payload);
 		const user = await this.userRepository.findOneOrFail({
 			where: { id: userId },
@@ -98,9 +99,11 @@ export class MeController {
 
 		this.authService.issueCookie(res, user, req.browserId);
 
-		const fieldsChanged = Object.keys(payload);
-		void this.internalHooks.onUserUpdate({ user, fields_changed: fieldsChanged });
-		this.eventRelay.emit('user-updated', { user, fieldsChanged });
+		const fieldsChanged = (Object.keys(payload) as Array<keyof UserUpdatePayload>).filter(
+			(key) => payload[key] !== preUpdateUser[key],
+		);
+
+		this.eventService.emit('user-updated', { user, fieldsChanged });
 
 		const publicUser = await this.userService.toPublic(user);
 
@@ -149,8 +152,7 @@ export class MeController {
 
 		this.authService.issueCookie(res, updatedUser, req.browserId);
 
-		void this.internalHooks.onUserUpdate({ user: updatedUser, fields_changed: ['password'] });
-		this.eventRelay.emit('user-updated', { user: updatedUser, fieldsChanged: ['password'] });
+		this.eventService.emit('user-updated', { user: updatedUser, fieldsChanged: ['password'] });
 
 		await this.externalHooks.run('user.password.update', [updatedUser.email, updatedUser.password]);
 
@@ -184,7 +186,10 @@ export class MeController {
 
 		this.logger.info('User survey updated successfully', { userId: req.user.id });
 
-		void this.internalHooks.onPersonalizationSurveySubmitted(req.user.id, personalizationAnswers);
+		this.eventService.emit('user-submitted-personalization-survey', {
+			userId: req.user.id,
+			answers: personalizationAnswers,
+		});
 
 		return { success: true };
 	}
@@ -198,8 +203,7 @@ export class MeController {
 
 		await this.userService.update(req.user.id, { apiKey });
 
-		void this.internalHooks.onApiKeyCreated({ user: req.user, public_api: false });
-		this.eventRelay.emit('api-key-created', { user: req.user });
+		this.eventService.emit('public-api-key-created', { user: req.user, publicApi: false });
 
 		return { apiKey };
 	}
@@ -209,7 +213,8 @@ export class MeController {
 	 */
 	@Get('/api-key', { middlewares: [isApiEnabledMiddleware] })
 	async getAPIKey(req: AuthenticatedRequest) {
-		return { apiKey: req.user.apiKey };
+		const apiKey = this.redactApiKey(req.user.apiKey);
+		return { apiKey };
 	}
 
 	/**
@@ -219,8 +224,7 @@ export class MeController {
 	async deleteAPIKey(req: AuthenticatedRequest) {
 		await this.userService.update(req.user.id, { apiKey: null });
 
-		void this.internalHooks.onApiKeyDeleted({ user: req.user, public_api: false });
-		this.eventRelay.emit('api-key-deleted', { user: req.user });
+		this.eventService.emit('public-api-key-deleted', { user: req.user, publicApi: false });
 
 		return { success: true };
 	}
@@ -243,5 +247,15 @@ export class MeController {
 		});
 
 		return user.settings;
+	}
+
+	private redactApiKey(apiKey: string | null) {
+		if (!apiKey) return;
+		const keepLength = 5;
+		return (
+			API_KEY_PREFIX +
+			apiKey.slice(API_KEY_PREFIX.length, API_KEY_PREFIX.length + keepLength) +
+			'*'.repeat(apiKey.length - API_KEY_PREFIX.length - keepLength)
+		);
 	}
 }
