@@ -281,12 +281,12 @@ export function useCanvasOperations({ router }: { router: ReturnType<typeof useR
 								{
 									node: incomingConnection.node,
 									type,
-									index: 0,
+									index: incomingConnection.index,
 								},
 								{
 									node: outgoingConnection.node,
 									type,
-									index: 0,
+									index: outgoingConnection.index,
 								},
 							]),
 						);
@@ -297,11 +297,13 @@ export function useCanvasOperations({ router }: { router: ReturnType<typeof useR
 						sourceHandle: createCanvasConnectionHandleString({
 							mode: CanvasConnectionMode.Output,
 							type,
+							index: incomingConnection.index,
 						}),
 						target: outgoingNodeId,
 						targetHandle: createCanvasConnectionHandleString({
 							mode: CanvasConnectionMode.Input,
 							type,
+							index: outgoingConnection.index,
 						}),
 					});
 				}
@@ -381,6 +383,7 @@ export function useCanvasOperations({ router }: { router: ReturnType<typeof useR
 			return;
 		}
 
+		workflowsStore.setNodePristine(node.name, false);
 		setNodeActiveByName(node.name);
 	}
 
@@ -1923,7 +1926,7 @@ export function useCanvasOperations({ router }: { router: ReturnType<typeof useR
 
 		workflowsStore.setWorkflowExecutionData(data);
 
-		if (data.mode !== 'manual') {
+		if (!['manual', 'evaluation'].includes(data.mode)) {
 			workflowsStore.setWorkflowPinData({});
 		}
 
@@ -1971,6 +1974,7 @@ export function useCanvasOperations({ router }: { router: ReturnType<typeof useR
 		revalidateNodeOutputConnections,
 		isConnectionAllowed,
 		filterConnectionsByNodes,
+		connectAdjacentNodes,
 		importWorkflowData,
 		fetchWorkflowDataFromUrl,
 		resetWorkspace,

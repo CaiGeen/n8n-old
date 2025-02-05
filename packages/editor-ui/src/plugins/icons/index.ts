@@ -53,6 +53,7 @@ import {
 	faEnvelope,
 	faEquals,
 	faEye,
+	faEyeSlash,
 	faExclamationTriangle,
 	faExpand,
 	faExpandAlt,
@@ -81,6 +82,7 @@ import {
 	faHandScissors,
 	faHandPointLeft,
 	faHandshake,
+	faUserCheck,
 	faHashtag,
 	faHdd,
 	faHistory,
@@ -228,6 +230,7 @@ export const FontAwesomePlugin: Plugin = {
 		addIcon(faEnvelope);
 		addIcon(faEquals);
 		addIcon(faEye);
+		addIcon(faEyeSlash);
 		addIcon(faExclamationTriangle);
 		addIcon(faExclamationCircle);
 		addIcon(faExpand);
@@ -256,6 +259,7 @@ export const FontAwesomePlugin: Plugin = {
 		addIcon(faHandshake);
 		addIcon(faHandPointLeft);
 		addIcon(faHashtag);
+		addIcon(faUserCheck);
 		addIcon(faHdd);
 		addIcon(faHistory);
 		addIcon(faHome);

@@ -1,10 +1,10 @@
 <script setup lang="ts" generic="T">
 import { useI18n } from '@/composables/useI18n';
-import type { TestDefinitionTableColumn } from './TestDefinitionTable.vue';
+import type { TestTableColumn } from './TestTableBase.vue';
 import { useRouter } from 'vue-router';
 
 defineProps<{
-	column: TestDefinitionTableColumn<T>;
+	column: TestTableColumn<T>;
 	row: T;
 }>();
 
@@ -23,26 +23,30 @@ function hasStatus(row: unknown): row is WithStatus {
 }
 
 const statusThemeMap: Record<string, string> = {
-	new: 'info',
+	new: 'default',
 	running: 'warning',
+	evaluation_running: 'warning',
 	completed: 'success',
 	error: 'danger',
 	success: 'success',
+	cancelled: 'default',
 };
 
 const statusLabelMap: Record<string, string> = {
 	new: locale.baseText('testDefinition.listRuns.status.new'),
 	running: locale.baseText('testDefinition.listRuns.status.running'),
+	evaluation_running: locale.baseText('testDefinition.listRuns.status.evaluating'),
 	completed: locale.baseText('testDefinition.listRuns.status.completed'),
 	error: locale.baseText('testDefinition.listRuns.status.error'),
 	success: locale.baseText('testDefinition.listRuns.status.success'),
+	cancelled: locale.baseText('testDefinition.listRuns.status.cancelled'),
 };
 
 function hasProperty(row: unknown, prop: string): row is Record<string, unknown> {
 	return typeof row === 'object' && row !== null && prop in row;
 }
 
-const getCellContent = (column: TestDefinitionTableColumn<T>, row: T) => {
+const getCellContent = (column: TestTableColumn<T>, row: T) => {
 	if (column.formatter) {
 		return column.formatter(row);
 	}
@@ -51,11 +55,11 @@ const getCellContent = (column: TestDefinitionTableColumn<T>, row: T) => {
 </script>
 
 <template>
-	<div v-if="column.route">
-		<a v-if="column.openInNewTab" :href="router.resolve(column.route(row)).href" target="_blank">
+	<div v-if="column.route?.(row)">
+		<a v-if="column.openInNewTab" :href="router.resolve(column.route(row)!).href" target="_blank">
 			{{ getCellContent(column, row) }}
 		</a>
-		<router-link v-else :to="column.route(row)">
+		<router-link v-else :to="column.route(row)!">
 			{{ getCellContent(column, row) }}
 		</router-link>
 	</div>
