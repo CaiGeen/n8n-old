@@ -166,7 +166,7 @@ import { useExternalHooks } from '@/composables/useExternalHooks';
 import { useClipboard } from '@/composables/useClipboard';
 import { usePinnedData } from '@/composables/usePinnedData';
 import { useSourceControlStore } from '@/stores/sourceControl.store';
-import { useDeviceSupport } from 'n8n-design-system';
+import { useDeviceSupport } from '@n8n/composables/useDeviceSupport';
 import { useDebounce } from '@/composables/useDebounce';
 import { useExecutionsStore } from '@/stores/executions.store';
 import { useCanvasPanning } from '@/composables/useCanvasPanning';
@@ -3392,10 +3392,15 @@ export default defineComponent({
 		async initView(): Promise<void> {
 			await this.loadCredentialsForWorkflow();
 
-			if (this.$route.params.action === 'workflowSave') {
+			if (this.$route.query.action === 'workflowSave') {
 				// In case the workflow got saved we do not have to run init
 				// as only the route changed but all the needed data is already loaded
 				this.uiStore.stateIsDirty = false;
+
+				// Remove the action from the query
+				await this.$router.replace({
+					query: { ...this.$route.query, action: undefined },
+				});
 				return;
 			}
 			if (this.blankRedirect) {

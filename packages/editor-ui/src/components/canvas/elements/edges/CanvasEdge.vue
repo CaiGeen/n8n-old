@@ -5,7 +5,7 @@ import { isValidNodeConnectionType } from '@/utils/typeGuards';
 import type { Connection, EdgeProps } from '@vue-flow/core';
 import { BaseEdge, EdgeLabelRenderer } from '@vue-flow/core';
 import { NodeConnectionType } from 'n8n-workflow';
-import { computed, useCssModule, toRef } from 'vue';
+import { computed, ref, toRef, useCssModule, watch } from 'vue';
 import CanvasEdgeToolbar from './CanvasEdgeToolbar.vue';
 import { getEdgeRenderData } from './utils';
 
@@ -33,7 +33,26 @@ const connectionType = computed(() =>
 		: NodeConnectionType.Main,
 );
 
-const renderToolbar = computed(() => props.hovered && !props.readOnly);
+const delayedHovered = ref(props.hovered);
+const delayedHoveredSetTimeoutRef = ref<NodeJS.Timeout | null>(null);
+const delayedHoveredTimeout = 300;
+
+watch(
+	() => props.hovered,
+	(isHovered) => {
+		if (isHovered) {
+			if (delayedHoveredSetTimeoutRef.value) clearTimeout(delayedHoveredSetTimeoutRef.value);
+			delayedHovered.value = true;
+		} else {
+			delayedHoveredSetTimeoutRef.value = setTimeout(() => {
+				delayedHovered.value = false;
+			}, delayedHoveredTimeout);
+		}
+	},
+	{ immediate: true },
+);
+
+const renderToolbar = computed(() => (props.selected || delayedHovered.value) && !props.readOnly);
 
 const isMainConnection = computed(() => data.value.source.type === NodeConnectionType.Main);
 
@@ -67,15 +86,16 @@ const edgeClasses = computed(() => ({
 }));
 
 const edgeLabelStyle = computed(() => ({
+	transform: `translate(0, ${isConnectorStraight.value ? '-100%' : '0%'})`,
 	color: edgeColor.value,
 }));
 
-const edgeToolbarStyle = computed(() => {
-	return {
-		transform: `translate(-50%, -50%) translate(${labelPosition.value[0]}px,${labelPosition.value[1]}px)`,
-		...(props.hovered ? { zIndex: 1 } : {}),
-	};
-});
+const isConnectorStraight = computed(() => renderData.value.isConnectorStraight);
+
+const edgeToolbarStyle = computed(() => ({
+	transform: `translate(-50%, -50%) translate(${labelPosition.value[0]}px, ${labelPosition.value[1]}px)`,
+	...(props.hovered ? { zIndex: 1 } : {}),
+}));
 
 const edgeToolbarClasses = computed(() => ({
 	[$style.edgeLabelWrapper]: true,
@@ -118,22 +138,28 @@ function onEdgeLabelMouseLeave() {
 </script>
 
 <template>
-	<BaseEdge
-		v-for="(segment, index) in segments"
-		:id="`${id}-${index}`"
-		:key="segment[0]"
-		:class="edgeClasses"
-		:style="edgeStyle"
-		:path="segment[0]"
-		:marker-end="markerEnd"
-		:interaction-width="40"
-	/>
+	<g
+		data-test-id="edge"
+		:data-source-node-name="data.source?.node"
+		:data-target-node-name="data.target?.node"
+	>
+		<BaseEdge
+			v-for="(segment, index) in segments"
+			:id="`${id}-${index}`"
+			:key="segment[0]"
+			:class="edgeClasses"
+			:style="edgeStyle"
+			:path="segment[0]"
+			:marker-end="markerEnd"
+			:interaction-width="40"
+		/>
+	</g>
 
 	<EdgeLabelRenderer>
 		<div
-			data-test-id="edge-label-wrapper"
-			:data-source-node-name="sourceNode?.label"
-			:data-target-node-name="targetNode?.label"
+			data-test-id="edge-label"
+			:data-source-node-name="data.source?.node"
+			:data-target-node-name="data.target?.node"
 			:data-edge-status="status"
 			:style="edgeToolbarStyle"
 			:class="edgeToolbarClasses"

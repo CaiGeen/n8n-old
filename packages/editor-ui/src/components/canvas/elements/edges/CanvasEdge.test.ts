@@ -1,10 +1,10 @@
-import CanvasEdge, { type CanvasEdgeProps } from './CanvasEdge.vue';
 import { createComponentRenderer } from '@/__tests__/render';
 import { createTestingPinia } from '@pinia/testing';
-import { setActivePinia } from 'pinia';
+import userEvent from '@testing-library/user-event';
 import { Position } from '@vue-flow/core';
 import { NodeConnectionType } from 'n8n-workflow';
-import userEvent from '@testing-library/user-event';
+import { setActivePinia } from 'pinia';
+import CanvasEdge, { type CanvasEdgeProps } from './CanvasEdge.vue';
 
 const DEFAULT_PROPS = {
 	sourceX: 0,
@@ -35,7 +35,7 @@ describe('CanvasEdge', () => {
 				hovered: true,
 			},
 		});
-		await userEvent.hover(getByTestId('edge-label-wrapper'));
+		await userEvent.hover(getByTestId('edge-label'));
 		const deleteButton = getByTestId('delete-connection-button');
 
 		await userEvent.click(deleteButton);
@@ -49,7 +49,7 @@ describe('CanvasEdge', () => {
 				hovered: true,
 			},
 		});
-		await userEvent.hover(getByTestId('edge-label-wrapper'));
+		await userEvent.hover(getByTestId('edge-label'));
 
 		const addButton = getByTestId('add-connection-button');
 
@@ -65,10 +65,34 @@ describe('CanvasEdge', () => {
 			},
 		});
 
-		await userEvent.hover(getByTestId('edge-label-wrapper'));
+		await userEvent.hover(getByTestId('edge-label'));
 
 		expect(() => getByTestId('add-connection-button')).toThrow();
 		expect(() => getByTestId('delete-connection-button')).toThrow();
+	});
+
+	it('should hide toolbar after delay', async () => {
+		vi.useFakeTimers();
+
+		const user = userEvent.setup({
+			advanceTimers: vi.advanceTimersByTime,
+		});
+
+		const { rerender, getByTestId, queryByTestId } = renderComponent({
+			props: { hovered: true },
+		});
+
+		await user.hover(getByTestId('edge-label'));
+		expect(queryByTestId('canvas-edge-toolbar')).toBeInTheDocument();
+
+		await rerender({ hovered: false });
+
+		await user.unhover(getByTestId('edge-label'));
+		expect(getByTestId('canvas-edge-toolbar')).toBeInTheDocument();
+
+		await vi.advanceTimersByTimeAsync(300);
+
+		expect(queryByTestId('canvas-edge-toolbar')).not.toBeInTheDocument();
 	});
 
 	it('should compute edgeStyle correctly', () => {
@@ -150,5 +174,33 @@ describe('CanvasEdge', () => {
 		const edge = container.querySelector('.vue-flow__edge-path');
 
 		expect(edge).toHaveAttribute('d', 'M0,0 C62.5,0 -162.5,-100 -100,-100');
+	});
+
+	it('should render a label above the connector when it is straight', () => {
+		const { container } = renderComponent({
+			props: {
+				...DEFAULT_PROPS,
+				sourceY: 50,
+				targetY: 50,
+			},
+		});
+
+		const label = container.querySelector('.vue-flow__edge-label')?.childNodes[0];
+
+		expect(label).toHaveAttribute('style', 'transform: translate(0, -100%);');
+	});
+
+	it("should render a label in the middle of the connector when it isn't straight", () => {
+		const { container } = renderComponent({
+			props: {
+				...DEFAULT_PROPS,
+				sourceY: 0,
+				targetY: 100,
+			},
+		});
+
+		const label = container.querySelector('.vue-flow__edge-label')?.childNodes[0];
+
+		expect(label).toHaveAttribute('style', 'transform: translate(0, 0%);');
 	});
 });

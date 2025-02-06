@@ -16,7 +16,7 @@ import type {
 	CanvasNodeEventBusEvents,
 	CanvasEventBusEvents,
 } from '@/types';
-import { CanvasConnectionMode } from '@/types';
+import { CanvasNodeRenderType, CanvasConnectionMode } from '@/types';
 import NodeIcon from '@/components/NodeIcon.vue';
 import { useNodeTypesStore } from '@/stores/nodeTypes.store';
 import CanvasNodeToolbar from '@/components/canvas/elements/nodes/CanvasNodeToolbar.vue';
@@ -106,6 +106,14 @@ const classes = computed(() => ({
 	selected: props.selected,
 	...Object.fromEntries([...nodeClasses.value].map((c) => [c, true])),
 }));
+
+const renderType = computed<CanvasNodeRenderType>(() => props.data.render.type);
+
+const dataTestId = computed(() =>
+	[CanvasNodeRenderType.StickyNote, CanvasNodeRenderType.AddNodes].includes(renderType.value)
+		? undefined
+		: 'canvas-node',
+);
 
 /**
  * Event bus
@@ -330,7 +338,7 @@ onBeforeUnmount(() => {
 <template>
 	<div
 		:class="classes"
-		data-test-id="canvas-node"
+		:data-test-id="dataTestId"
 		:data-node-name="data.name"
 		:data-node-type="data.type"
 	>
@@ -345,7 +353,8 @@ onBeforeUnmount(() => {
 				:is-valid-connection="isValidConnection"
 				:data-node-name="data.name"
 				data-test-id="canvas-node-output-handle"
-				:data-handle-index="source.index"
+				:data-index="source.index"
+				:data-connection-type="source.type"
 				@add="onAdd"
 			/>
 		</template>
@@ -360,7 +369,8 @@ onBeforeUnmount(() => {
 				:is-read-only="readOnly"
 				:is-valid-connection="isValidConnection"
 				data-test-id="canvas-node-input-handle"
-				:data-handle-index="target.index"
+				:data-index="target.index"
+				:data-connection-type="target.type"
 				:data-node-name="data.name"
 				@add="onAdd"
 			/>
