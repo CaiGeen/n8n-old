@@ -64,13 +64,13 @@ import { isCredentialOnlyNodeType } from '@/utils/credentialOnlyNodes';
 import { N8nIcon, N8nInput, N8nInputNumber, N8nOption, N8nSelect } from '@n8n/design-system';
 import type { EventBus } from '@n8n/utils/event-bus';
 import { createEventBus } from '@n8n/utils/event-bus';
-import { useRouter } from 'vue-router';
 import { useElementSize } from '@vueuse/core';
 import { captureMessage } from '@sentry/vue';
 import { completeExpressionSyntax, shouldConvertToExpression } from '@/utils/expressions';
 import { isPresent } from '@/utils/typesUtils';
 import CssEditor from './CssEditor/CssEditor.vue';
 import { useUIStore } from '@/stores/ui.store';
+import { useFocusPanelStore } from '@/stores/focusPanel.store';
 
 type Picker = { $emit: (arg0: string, arg1: Date) => void };
 
@@ -124,8 +124,7 @@ const externalHooks = useExternalHooks();
 const i18n = useI18n();
 const nodeHelpers = useNodeHelpers();
 const { debounce } = useDebounce();
-const router = useRouter();
-const workflowHelpers = useWorkflowHelpers({ router });
+const workflowHelpers = useWorkflowHelpers();
 const telemetry = useTelemetry();
 
 const credentialsStore = useCredentialsStore();
@@ -134,9 +133,10 @@ const workflowsStore = useWorkflowsStore();
 const settingsStore = useSettingsStore();
 const nodeTypesStore = useNodeTypesStore();
 const uiStore = useUIStore();
+const focusPanelStore = useFocusPanelStore();
 
 // ESLint: false positive
-// eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents, @typescript-eslint/no-duplicate-type-constituents
+// eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
 const inputField = ref<InstanceType<typeof N8nInput | typeof N8nSelect> | HTMLElement>();
 const wrapper = ref<HTMLDivElement>();
 
@@ -931,7 +931,7 @@ function valueChanged(value: NodeParameterValueType | {} | Date) {
 		telemetry.track('User set node operation or mode', {
 			workflow_id: workflowsStore.workflowId,
 			node_type: node.value?.type,
-			resource: node.value && node.value.parameters.resource,
+			resource: node.value?.parameters.resource,
 			is_custom: value === CUSTOM_API_CALL_KEY,
 			push_ref: ndvStore.pushRef,
 			parameter: props.parameter.name,
@@ -1044,6 +1044,22 @@ async function optionSelected(command: string) {
 		};
 		telemetry.track('User switched parameter mode', telemetryPayload);
 		void externalHooks.run('parameterInput.modeSwitch', telemetryPayload);
+	}
+
+	if (node.value && command === 'focus') {
+		focusPanelStore.setFocusedNodeParameter({
+			nodeId: node.value.id,
+			parameterPath: props.path,
+			parameter: props.parameter,
+		});
+
+		if (ndvStore.activeNode) {
+			ndvStore.activeNodeName = null;
+			// TODO: check what this does - close method on NodeDetailsView
+			ndvStore.resetNDVPushRef();
+		}
+
+		focusPanelStore.focusPanelActive = true;
 	}
 }
 
@@ -1379,15 +1395,18 @@ onUpdated(async () => {
 					@update:model-value="valueChangedDebounced"
 				>
 					<template #suffix>
-						<N8nIcon
+						<span
 							v-if="!editorIsReadOnly"
-							data-test-id="code-editor-fullscreen-button"
-							icon="external-link-alt"
-							size="xsmall"
 							class="textarea-modal-opener"
-							:title="i18n.baseText('parameterInput.openEditWindow')"
+							data-test-id="code-editor-fullscreen-button"
 							@click="displayEditDialog()"
-						/>
+						>
+							<N8nIcon
+								icon="external-link"
+								size="xsmall"
+								:title="i18n.baseText('parameterInput.openEditWindow')"
+							/>
+						</span>
 					</template>
 				</CodeNodeEditor>
 
@@ -1401,14 +1420,17 @@ onUpdated(async () => {
 					@update:model-value="valueChangedDebounced"
 				>
 					<template #suffix>
-						<N8nIcon
-							data-test-id="code-editor-fullscreen-button"
-							icon="external-link-alt"
-							size="xsmall"
+						<span
 							class="textarea-modal-opener"
-							:title="i18n.baseText('parameterInput.openEditWindow')"
+							data-test-id="code-editor-fullscreen-button"
 							@click="displayEditDialog()"
-						/>
+						>
+							<N8nIcon
+								icon="external-link"
+								size="xsmall"
+								:title="i18n.baseText('parameterInput.openEditWindow')"
+							/>
+						</span>
 					</template>
 				</HtmlEditor>
 
@@ -1420,14 +1442,17 @@ onUpdated(async () => {
 					@update:model-value="valueChangedDebounced"
 				>
 					<template #suffix>
-						<N8nIcon
-							data-test-id="code-editor-fullscreen-button"
-							icon="external-link-alt"
-							size="xsmall"
+						<span
 							class="textarea-modal-opener"
-							:title="i18n.baseText('parameterInput.openEditWindow')"
+							data-test-id="code-editor-fullscreen-button"
 							@click="displayEditDialog()"
-						/>
+						>
+							<N8nIcon
+								icon="external-link"
+								size="xsmall"
+								:title="i18n.baseText('parameterInput.openEditWindow')"
+							/>
+						</span>
 					</template>
 				</CssEditor>
 
@@ -1440,14 +1465,17 @@ onUpdated(async () => {
 					@update:model-value="valueChangedDebounced"
 				>
 					<template #suffix>
-						<N8nIcon
-							data-test-id="code-editor-fullscreen-button"
-							icon="external-link-alt"
-							size="xsmall"
+						<span
 							class="textarea-modal-opener"
-							:title="i18n.baseText('parameterInput.openEditWindow')"
+							data-test-id="code-editor-fullscreen-button"
 							@click="displayEditDialog()"
-						/>
+						>
+							<N8nIcon
+								icon="external-link"
+								size="xsmall"
+								:title="i18n.baseText('parameterInput.openEditWindow')"
+							/>
+						</span>
 					</template>
 				</SqlEditor>
 
@@ -1460,15 +1488,18 @@ onUpdated(async () => {
 					@update:model-value="valueChangedDebounced"
 				>
 					<template #suffix>
-						<N8nIcon
+						<span
 							v-if="!editorIsReadOnly"
-							data-test-id="code-editor-fullscreen-button"
-							icon="external-link-alt"
-							size="xsmall"
 							class="textarea-modal-opener"
-							:title="i18n.baseText('parameterInput.openEditWindow')"
+							data-test-id="code-editor-fullscreen-button"
 							@click="displayEditDialog()"
-						/>
+						>
+							<N8nIcon
+								icon="external-link"
+								size="xsmall"
+								:title="i18n.baseText('parameterInput.openEditWindow')"
+							/>
+						</span>
 					</template>
 				</JsEditor>
 
@@ -1480,14 +1511,17 @@ onUpdated(async () => {
 					@update:model-value="valueChangedDebounced"
 				>
 					<template #suffix>
-						<N8nIcon
-							data-test-id="code-editor-fullscreen-button"
-							icon="external-link-alt"
-							size="xsmall"
+						<span
 							class="textarea-modal-opener"
-							:title="i18n.baseText('parameterInput.openEditWindow')"
+							data-test-id="code-editor-fullscreen-button"
 							@click="displayEditDialog()"
-						/>
+						>
+							<N8nIcon
+								icon="external-link"
+								size="xsmall"
+								:title="i18n.baseText('parameterInput.openEditWindow')"
+							/>
+						</span>
 					</template>
 				</JsonEditor>
 
@@ -1526,19 +1560,23 @@ onUpdated(async () => {
 					@paste="onPaste"
 				>
 					<template #suffix>
-						<N8nIcon
+						<span
 							v-if="!isReadOnly && !isSecretParameter"
-							icon="external-link-alt"
-							size="xsmall"
-							class="edit-window-button textarea-modal-opener"
 							:class="{
+								'textarea-modal-opener': true,
+								'edit-window-button': true,
 								focused: isFocused,
 								invalid: !isFocused && getIssues.length > 0 && !isModelValueExpression,
 							}"
-							:title="i18n.baseText('parameterInput.openEditWindow')"
 							@click="displayEditDialog()"
 							@focus="setFocus"
-						/>
+						>
+							<N8nIcon
+								icon="external-link"
+								size="xsmall"
+								:title="i18n.baseText('parameterInput.openEditWindow')"
+							/>
+						</span>
 					</template>
 				</N8nInput>
 			</div>

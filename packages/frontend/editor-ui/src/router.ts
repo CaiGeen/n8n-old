@@ -21,15 +21,17 @@ import { tryToParseNumber } from '@/utils/typesUtils';
 import { projectsRoutes } from '@/routes/projects.routes';
 import { insightsRoutes } from '@/features/insights/insights.router';
 import TestRunDetailView from '@/views/Evaluations.ee/TestRunDetailView.vue';
+import { MfaRequiredError } from '@n8n/rest-api-client';
 
 const ChangePasswordView = async () => await import('./views/ChangePasswordView.vue');
 const ErrorView = async () => await import('./views/ErrorView.vue');
+const EntityNotFound = async () => await import('./views/EntityNotFound.vue');
+const EntityUnAuthorised = async () => await import('./views/EntityUnAuthorised.vue');
 const ForgotMyPasswordView = async () => await import('./views/ForgotMyPasswordView.vue');
 const MainHeader = async () => await import('@/components/MainHeader/MainHeader.vue');
 const MainSidebar = async () => await import('@/components/MainSidebar.vue');
-const CanvasChatSwitch = async () => await import('@/components/CanvasChat/CanvasChatSwitch.vue');
-const DemoFooter = async () =>
-	await import('@/components/CanvasChat/future/components/DemoFooter.vue');
+const LogsPanel = async () => await import('@/features/logs/components/LogsPanel.vue');
+const DemoFooter = async () => await import('@/features/logs/components/DemoFooter.vue');
 const NodeView = async () => await import('@/views/NodeView.vue');
 const WorkflowExecutionsView = async () => await import('@/views/WorkflowExecutionsView.vue');
 const WorkflowExecutionsLandingPage = async () =>
@@ -208,6 +210,7 @@ export const routes: RouteRecordRaw[] = [
 			default: NodeView,
 			header: MainHeader,
 			sidebar: MainSidebar,
+			footer: LogsPanel,
 		},
 		meta: {
 			nodeView: true,
@@ -343,7 +346,7 @@ export const routes: RouteRecordRaw[] = [
 			default: NodeView,
 			header: MainHeader,
 			sidebar: MainSidebar,
-			footer: CanvasChatSwitch,
+			footer: LogsPanel,
 		},
 		meta: {
 			nodeView: true,
@@ -377,7 +380,7 @@ export const routes: RouteRecordRaw[] = [
 			default: NodeView,
 			header: MainHeader,
 			sidebar: MainSidebar,
-			footer: CanvasChatSwitch,
+			footer: LogsPanel,
 		},
 		meta: {
 			nodeView: true,
@@ -722,6 +725,24 @@ export const routes: RouteRecordRaw[] = [
 	...projectsRoutes,
 	...insightsRoutes,
 	{
+		path: '/entity-not-found/:entityType(credential|workflow)',
+		props: true,
+		name: VIEWS.ENTITY_NOT_FOUND,
+		components: {
+			default: EntityNotFound,
+			sidebar: MainSidebar,
+		},
+	},
+	{
+		path: '/entity-not-authorized/:entityType(credential|workflow)',
+		props: true,
+		name: VIEWS.ENTITY_UNAUTHORIZED,
+		components: {
+			default: EntityUnAuthorised,
+			sidebar: MainSidebar,
+		},
+	},
+	{
 		path: '/:pathMatch(.*)*',
 		name: VIEWS.NOT_FOUND,
 		component: ErrorView,
@@ -812,6 +833,14 @@ router.beforeEach(async (to: RouteLocationNormalized, from, next) => {
 
 		return next();
 	} catch (failure) {
+		const settingsStore = useSettingsStore();
+		if (failure instanceof MfaRequiredError && settingsStore.isMFAEnforced) {
+			if (to.name !== VIEWS.PERSONAL_SETTINGS) {
+				return next({ name: VIEWS.PERSONAL_SETTINGS });
+			} else {
+				return next();
+			}
+		}
 		if (isNavigationFailure(failure)) {
 			console.log(failure);
 		} else {

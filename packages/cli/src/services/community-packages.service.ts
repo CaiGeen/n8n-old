@@ -3,6 +3,7 @@ import { GlobalConfig } from '@n8n/config';
 import { LICENSE_FEATURES } from '@n8n/constants';
 import type { InstalledPackages } from '@n8n/db';
 import { InstalledPackagesRepository } from '@n8n/db';
+import { OnPubSubEvent } from '@n8n/decorators';
 import { Service } from '@n8n/di';
 import axios from 'axios';
 import { exec } from 'child_process';
@@ -348,8 +349,10 @@ export class CommunityPackagesService {
 	async updatePackage(
 		packageName: string,
 		installedPackage: InstalledPackages,
+		version?: string,
+		checksum?: string,
 	): Promise<InstalledPackages> {
-		return await this.installOrUpdatePackage(packageName, { installedPackage });
+		return await this.installOrUpdatePackage(packageName, { installedPackage, version, checksum });
 	}
 
 	async removePackage(packageName: string, installedPackage: InstalledPackages): Promise<void> {
@@ -375,9 +378,7 @@ export class CommunityPackagesService {
 		);
 	}
 
-	private checkInstallPermissions(isUpdate: boolean, checksumProvided: boolean) {
-		if (isUpdate) return;
-
+	private checkInstallPermissions(checksumProvided: boolean) {
 		if (!this.globalConfig.nodes.communityPackages.unverifiedEnabled && !checksumProvided) {
 			throw new UnexpectedError('Installation of unverified community packages is forbidden!');
 		}
@@ -385,15 +386,17 @@ export class CommunityPackagesService {
 
 	private async installOrUpdatePackage(
 		packageName: string,
-		options: { version?: string; checksum?: string } | { installedPackage: InstalledPackages },
+		options:
+			| { version?: string; checksum?: string }
+			| { installedPackage: InstalledPackages; version?: string; checksum?: string } = {},
 	) {
 		const isUpdate = 'installedPackage' in options;
-		const packageVersion = isUpdate || !options.version ? 'latest' : options.version;
+		const packageVersion = !options.version ? 'latest' : options.version;
 
 		const shouldValidateChecksum = 'checksum' in options && Boolean(options.checksum);
-		this.checkInstallPermissions(isUpdate, shouldValidateChecksum);
+		this.checkInstallPermissions(shouldValidateChecksum);
 
-		if (!isUpdate && options.checksum) {
+		if (options.checksum) {
 			await verifyIntegrity(packageName, packageVersion, this.getNpmRegistry(), options.checksum);
 		}
 
@@ -447,14 +450,28 @@ export class CommunityPackagesService {
 		}
 	}
 
-	async installOrUpdateNpmPackage(packageName: string, packageVersion: string) {
+	@OnPubSubEvent('community-package-install')
+	@OnPubSubEvent('community-package-update')
+	async handleInstallEvent({
+		packageName,
+		packageVersion,
+	}: { packageName: string; packageVersion: string }) {
+		await this.installOrUpdateNpmPackage(packageName, packageVersion);
+	}
+
+	@OnPubSubEvent('community-package-uninstall')
+	async handleUninstallEvent({ packageName }: { packageName: string }) {
+		await this.removeNpmPackage(packageName);
+	}
+
+	private async installOrUpdateNpmPackage(packageName: string, packageVersion: string) {
 		await this.downloadPackage(packageName, packageVersion);
 		await this.loadNodesAndCredentials.loadPackage(packageName);
 		await this.loadNodesAndCredentials.postProcessLoaders();
 		this.logger.info(`Community package installed: ${packageName}`);
 	}
 
-	async removeNpmPackage(packageName: string) {
+	private async removeNpmPackage(packageName: string) {
 		await this.deletePackageDirectory(packageName);
 		await this.loadNodesAndCredentials.unloadPackage(packageName);
 		await this.loadNodesAndCredentials.postProcessLoaders();

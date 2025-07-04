@@ -14,6 +14,11 @@ export type TableHeader<T> = {
 	| { key: string; value: AccessorFn<T> }
 );
 export type TableSortBy = SortingState;
+export type TableOptions = {
+	page: number;
+	itemsPerPage: number;
+	sortBy: Array<{ id: string; desc: boolean }>;
+};
 </script>
 
 <script setup lang="ts" generic="T extends Record<string, any>">
@@ -32,7 +37,7 @@ import type {
 	Updater,
 } from '@tanstack/vue-table';
 import { createColumnHelper, FlexRender, getCoreRowModel, useVueTable } from '@tanstack/vue-table';
-import { ElCheckbox } from 'element-plus';
+import { ElCheckbox, ElOption, ElSelect, ElSkeletonItem } from 'element-plus';
 import get from 'lodash/get';
 import { computed, h, ref, shallowRef, useSlots, watch } from 'vue';
 
@@ -72,13 +77,7 @@ defineSlots<{
 
 const emit = defineEmits<{
 	// eslint-disable-next-line @typescript-eslint/naming-convention
-	'update:options': [
-		payload: {
-			page: number;
-			itemsPerPage: number;
-			sortBy: Array<{ id: string; desc: boolean }>;
-		},
-	];
+	'update:options': [payload: TableOptions];
 	// eslint-disable-next-line @typescript-eslint/naming-convention
 	'click:row': [event: MouseEvent, payload: { item: T }];
 }>();
@@ -205,7 +204,10 @@ const page = defineModel<number>('page', { default: 0 });
 watch(page, () => table.setPageIndex(page.value));
 
 const itemsPerPage = defineModel<number>('items-per-page', { default: 10 });
-watch(itemsPerPage, () => (page.value = 0));
+watch(itemsPerPage, () => {
+	page.value = 0;
+	table.setPageSize(itemsPerPage.value);
+});
 
 const pagination = computed<PaginationState>({
 	get() {
@@ -225,13 +227,16 @@ const showPagination = computed(() => props.itemsLength > Math.min(...props.page
 const sortBy = defineModel<SortingState>('sort-by', { default: [], required: false });
 
 function handleSortingChange(updaterOrValue: Updater<SortingState>) {
-	sortBy.value =
+	const newValue =
 		typeof updaterOrValue === 'function' ? updaterOrValue(sortBy.value) : updaterOrValue;
+	sortBy.value = newValue;
 
+	// Use newValue instead of sortBy.value to ensure the latest value is used
+	// This is because of the async nature of the Vue reactivity system
 	emit('update:options', {
 		page: page.value,
 		itemsPerPage: itemsPerPage.value,
-		sortBy: sortBy.value,
+		sortBy: newValue,
 	});
 }
 
@@ -422,7 +427,7 @@ const table = useVueTable({
 									:key="coll.id"
 									class="el-skeleton is-animated"
 								>
-									<el-skeleton-item />
+									<ElSkeletonItem />
 								</td>
 							</tr>
 						</template>
@@ -464,14 +469,14 @@ const table = useVueTable({
 			</N8nPagination>
 			<div class="table-pagination__sizes">
 				<div class="table-pagination__sizes__label">Page size</div>
-				<el-select
+				<ElSelect
 					v-model.number="itemsPerPage"
 					class="table-pagination__sizes__select"
 					size="small"
 					:teleported="false"
 				>
-					<el-option v-for="item in pageSizes" :key="item" :label="item" :value="item" />
-				</el-select>
+					<ElOption v-for="item in pageSizes" :key="item" :label="item" :value="item" />
+				</ElSelect>
 			</div>
 		</div>
 	</div>

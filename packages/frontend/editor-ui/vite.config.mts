@@ -28,8 +28,16 @@ const alias = [
 		replacement: resolve(packagesDir, 'frontend', '@n8n', 'chat', 'src$1'),
 	},
 	{
+		find: /^@n8n\/api-requests(.+)$/,
+		replacement: resolve(packagesDir, 'frontend', '@n8n', 'api-requests', 'src$1'),
+	},
+	{
 		find: /^@n8n\/composables(.+)$/,
 		replacement: resolve(packagesDir, 'frontend', '@n8n', 'composables', 'src$1'),
+	},
+	{
+		find: /^@n8n\/constants(.+)$/,
+		replacement: resolve(packagesDir, '@n8n', 'constants', 'src$1'),
 	},
 	{
 		find: /^@n8n\/design-system(.+)$/,
@@ -65,8 +73,12 @@ const plugins = [
 	components({
 		dts: './src/components.d.ts',
 		resolvers: [
+			(componentName) => {
+				if (componentName.startsWith('N8n'))
+					return { name: componentName, from: '@n8n/design-system' };
+			},
 			iconsResolver({
-				prefix: 'icon',
+				prefix: 'Icon',
 			}),
 		],
 	}),
@@ -119,7 +131,7 @@ export default mergeConfig(
 		plugins,
 		resolve: { alias },
 		base: publicPath,
-		envPrefix: 'VUE_APP',
+		envPrefix: 'VUE',
 		css: {
 			preprocessorOptions: {
 				scss: {
